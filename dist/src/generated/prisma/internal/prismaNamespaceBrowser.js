@@ -110,7 +110,8 @@ export const UserScalarFieldEnum = {
     id: 'id',
     email: 'email',
     name: 'name',
-    password: 'password'
+    password: 'password',
+    image: 'image'
 };
 export const NotificationScalarFieldEnum = {
     id: 'id',
