@@ -7,6 +7,15 @@ import { extractTextFromFile } from './utils/parser.js';
 import { generateKeywords } from './utils/parser.js';
 import { prisma } from './utils/prisma.js';
 
+
+interface SectionData {
+    documentId: string;
+    title: string;
+    content: string;
+    keywords: string;
+}
+
+
 const connection = new Redis({
   host: process.env.REDIS_HOST,
   port: Number(process.env.REDIS_PORT),
@@ -19,7 +28,6 @@ const connection = new Redis({
   connectTimeout: 10000,
   maxRetriesPerRequest: null,
 });
-
 
 connection.on('connect', () => console.log('Connected to Aiven Valkey!'));
 connection.on('error', (err) => console.error('Redis error:', err));
@@ -38,42 +46,37 @@ const worker = new Worker('process_document', async (job: Job) => {
     const fileBuffer = await downloadFile(filePath);
     const sections = await extractTextFromFile(fileBuffer,fileName);
     // console.log(sections);
-    const sectionWithKeywords = sections.map((section:any) => ({
-     ...section,
-     keywords:generateKeywords(section.content)
-    }))
+  const data: SectionData[] = [];
 
-    for(const sec of sectionWithKeywords)
-    {
-  await prisma.section.create({
-    data:{
-        documentId:documentId,
-        title:sec.title,
-        content:sec.content,
-        keywords:sec.keywords.join(",")
+for (const section of sections) {
+const keywords = generateKeywords(section.content) || [];
+
+  data.push({
+    documentId,
+    title: section.title,
+    content: section.content,
+    keywords: keywords.join(",")
+  })
+}
+   
+await prisma.$transaction(async (tx) => {
+  await tx.section.createMany({ data: data })
+
+  await tx.document.update({
+    where: { id: documentId },
+    data: { status: "completed" }
+  })
+
+  await tx.notification.create({
+    data: {
+      userId,
+      type: "ai_processing",
+      reach: "personal",
+      title: "AI processing completed.",
+      workspaceId
     }
   })
-    }
-  
-
-    await prisma.document.update({
-    where:{
-        id:documentId
-    },
-    data:{
-        status:"completed"
-    }
-    })
-
-    await prisma.notification.create({
-       data:{
-        userId,
-        type:"ai_processing",
-        reach:"personal",
-        title:"AI processing completed .",
-        workspaceId
-       }
-    })
+});
  
     console.log("document processed successfully");
 
@@ -95,6 +98,7 @@ throw err;
 })
 
 worker.on("completed",(job)=>{
+    
 console.log(` Job ${job.id} completed`);
 })
 

@@ -32,36 +32,31 @@ const worker = new Worker('process_document', async (job) => {
         const fileBuffer = await downloadFile(filePath);
         const sections = await extractTextFromFile(fileBuffer, fileName);
         // console.log(sections);
-        const sectionWithKeywords = sections.map((section) => ({
-            ...section,
-            keywords: generateKeywords(section.content)
-        }));
-        for (const sec of sectionWithKeywords) {
-            await prisma.section.create({
-                data: {
-                    documentId: documentId,
-                    title: sec.title,
-                    content: sec.content,
-                    keywords: sec.keywords.join(",")
-                }
+        const data = [];
+        for (const section of sections) {
+            const keywords = generateKeywords(section.content) || [];
+            data.push({
+                documentId,
+                title: section.title,
+                content: section.content,
+                keywords: keywords.join(",")
             });
         }
-        await prisma.document.update({
-            where: {
-                id: documentId
-            },
-            data: {
-                status: "completed"
-            }
-        });
-        await prisma.notification.create({
-            data: {
-                userId,
-                type: "ai_processing",
-                reach: "personal",
-                title: "AI processing completed .",
-                workspaceId
-            }
+        await prisma.$transaction(async (tx) => {
+            await tx.section.createMany({ data: data });
+            await tx.document.update({
+                where: { id: documentId },
+                data: { status: "completed" }
+            });
+            await tx.notification.create({
+                data: {
+                    userId,
+                    type: "ai_processing",
+                    reach: "personal",
+                    title: "AI processing completed.",
+                    workspaceId
+                }
+            });
         });
         console.log("document processed successfully");
     }
